@@ -51,6 +51,8 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|logo.png|logo-alt.png|.*\\.(?:png|jpg|jpeg|svg|gif|webp|ico)$).*)",
+    // api/heartbeat queda fuera: lo invoca el cron de Vercel (sin sesión) y se
+    // protege solo con CRON_SECRET dentro del route handler.
+    "/((?!_next/static|_next/image|api/heartbeat|favicon.ico|logo.png|logo-alt.png|.*\\.(?:png|jpg|jpeg|svg|gif|webp|ico)$).*)",
   ],
 };
