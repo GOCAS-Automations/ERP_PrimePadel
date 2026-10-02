@@ -3,11 +3,11 @@
 import { revalidatePath } from "next/cache";
 import { categoriaSchema } from "@/lib/validators/producto";
 import { sbAdmin } from "@/lib/supabase/admin-server";
-import { requireAdmin } from "@/lib/auth";
+import { requireMaestro } from "@/lib/auth";
 import { humanizarError } from "@/lib/errors";
 
 export async function createCategoria(input: unknown) {
-  await requireAdmin();
+  await requireMaestro();
   const parsed = categoriaSchema.parse(input);
   const { error } = await sbAdmin().from("categorias").insert(parsed);
   if (error) return { error: humanizarError(error.message) };
@@ -17,7 +17,7 @@ export async function createCategoria(input: unknown) {
 }
 
 export async function updateCategoria(id: string, input: unknown) {
-  await requireAdmin();
+  await requireMaestro();
   const parsed = categoriaSchema.parse(input);
   const { error } = await sbAdmin().from("categorias").update(parsed).eq("id", id);
   if (error) return { error: humanizarError(error.message) };
@@ -27,7 +27,7 @@ export async function updateCategoria(id: string, input: unknown) {
 }
 
 export async function deleteCategoria(id: string) {
-  await requireAdmin();
+  await requireMaestro();
   const sb = sbAdmin();
   const { count } = await sb.from("productos").select("*", { head: true, count: "exact" }).eq("categoria_id", id);
   if ((count ?? 0) > 0) {

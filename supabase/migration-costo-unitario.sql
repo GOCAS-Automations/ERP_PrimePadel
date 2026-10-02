@@ -169,3 +169,8 @@ begin
   return v_id;
 end;
 $$;
+
+-- 4) La función recreada vuelve a heredar EXECUTE para public/anon/authenticated:
+--    restringirla a service_role (ver supabase/security_hardening.sql).
+revoke all on function registrar_transaccion(text, timestamptz, uuid, text, text, jsonb) from public, anon, authenticated;
+grant execute on function registrar_transaccion(text, timestamptz, uuid, text, text, jsonb) to service_role;

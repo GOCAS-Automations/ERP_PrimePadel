@@ -170,7 +170,9 @@ create trigger trg_stock_updated before update on stock_por_ubicacion
   for each row execute function touch_updated_at();
 
 -- 4.1 Vista: cantidad total y valoración por producto
-create or replace view v_stock_total as
+-- security_invoker: la vista respeta el RLS de quien consulta (sin esto, una
+-- vista corre con permisos de su dueño y expone los datos a la key pública).
+create or replace view v_stock_total with (security_invoker = true) as
 select
   p.id                                 as producto_id,
   p.codigo,
@@ -478,11 +480,18 @@ end;
 $$;
 
 -- ----------------------------------------------------------------------------
--- 11. RLS (placeholders; activar cuando conectemos auth real)
+-- 11. PRIVILEGIOS: solo service_role ejecuta las RPC y lee la vista.
+--     Por defecto Postgres/Supabase dan EXECUTE a public/anon/authenticated,
+--     lo que permitía llamar /rest/v1/rpc/* con la key pública.
 -- ----------------------------------------------------------------------------
--- Planificado:
---   admin  → full access
---   cajero → lectura general + insert en transacciones/ajustes; no delete
--- Por ahora las tablas NO tienen RLS activo para permitir desarrollo y migración.
--- En la fase 7 del plan agregaremos: alter table … enable row level security;
+revoke all on function registrar_transaccion(text, timestamptz, uuid, text, text, jsonb) from public, anon, authenticated;
+revoke all on function registrar_ajuste_inventario(uuid, uuid, integer, text, text, uuid) from public, anon, authenticated;
+revoke all on function touch_updated_at() from public, anon, authenticated;
+grant execute on function registrar_transaccion(text, timestamptz, uuid, text, text, jsonb) to service_role;
+grant execute on function registrar_ajuste_inventario(uuid, uuid, integer, text, text, uuid) to service_role;
+revoke all on v_stock_total from public, anon, authenticated;
+grant select on v_stock_total to service_role;
+
+-- ----------------------------------------------------------------------------
+-- 12. RLS: ejecutar después supabase/rls.sql y supabase/security_hardening.sql.
 -- ----------------------------------------------------------------------------

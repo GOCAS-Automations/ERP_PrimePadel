@@ -1,7 +1,12 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { z } from "zod";
 import { productoSchema, ajusteInventarioSchema } from "@/lib/validators/producto";
+
+const preciosSchema = z
+  .array(z.object({ lista_precio_id: z.string().uuid(), precio: z.number().nonnegative().max(1_000_000_000) }))
+  .max(100);
 import { sbAdmin } from "@/lib/supabase/admin-server";
 import { requireAdmin, requireMaestro } from "@/lib/auth";
 import { humanizarError } from "@/lib/errors";
@@ -15,9 +20,10 @@ function stripMaestroFields<T extends Record<string, unknown>>(obj: T): Partial<
   return clone as Partial<T>;
 }
 
-export async function createProducto(input: unknown, precios: { lista_precio_id: string; precio: number }[] = []) {
+export async function createProducto(input: unknown, preciosInput: { lista_precio_id: string; precio: number }[] = []) {
   const perfil = await requireAdmin();
   const parsed = productoSchema.parse(input);
+  const precios = preciosSchema.parse(preciosInput);
   const payload = perfil.rol === "maestro" ? parsed : stripMaestroFields(parsed);
   const sb = sbAdmin();
   const { data, error } = await sb.from("productos").insert(payload).select("id").single();
@@ -27,7 +33,7 @@ export async function createProducto(input: unknown, precios: { lista_precio_id:
     const payloadPrecios = precios.filter((p) => p.precio > 0).map((p) => ({ ...p, producto_id: data.id }));
     if (payloadPrecios.length > 0) {
       const { error: e2 } = await sb.from("precios_producto").insert(payloadPrecios);
-      if (e2) return { error: e2.message };
+      if (e2) return { error: humanizarError(e2.message) };
     }
   }
   revalidatePath("/inventario");
@@ -35,9 +41,10 @@ export async function createProducto(input: unknown, precios: { lista_precio_id:
   return { ok: true, id: data.id };
 }
 
-export async function updateProducto(id: string, input: unknown, precios: { lista_precio_id: string; precio: number }[] = []) {
+export async function updateProducto(id: string, input: unknown, preciosInput: { lista_precio_id: string; precio: number }[] = []) {
   const perfil = await requireAdmin();
   const parsed = productoSchema.parse(input);
+  const precios = preciosSchema.parse(preciosInput);
   const payload = perfil.rol === "maestro" ? parsed : stripMaestroFields(parsed);
   const sb = sbAdmin();
   const { error } = await sb.from("productos").update(payload).eq("id", id);
@@ -48,7 +55,7 @@ export async function updateProducto(id: string, input: unknown, precios: { list
     const payloadPrecios = precios.filter((p) => p.precio > 0).map((p) => ({ ...p, producto_id: id }));
     if (payloadPrecios.length > 0) {
       const { error: e2 } = await sb.from("precios_producto").insert(payloadPrecios);
-      if (e2) return { error: e2.message };
+      if (e2) return { error: humanizarError(e2.message) };
     }
   }
   revalidatePath("/inventario");

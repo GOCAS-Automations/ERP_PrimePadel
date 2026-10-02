@@ -42,6 +42,10 @@ export function CargaMasivaClient({ catalogo, soloVentas }: { catalogo: Catalogo
   }
 
   async function onFile(file: File) {
+    if (file.size > 5 * 1024 * 1024) {
+      toast.push({ message: "El archivo supera 5 MB. Divídelo en archivos más pequeños.", tone: "error" });
+      return;
+    }
     setFileName(file.name);
     setResumen(null);
     const text = await file.text();

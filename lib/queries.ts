@@ -39,6 +39,36 @@ export async function getListasPrecios() {
   return data ?? [];
 }
 
+// Precio efectivo por (producto, tarifa activa) con la misma regla que la UI:
+// precio manual en precios_producto; si no hay, Detal × (1 − descuento%).
+// Clave: `${producto_id}|${lista_precio_id}`. Se usa para que el servidor fije
+// el precio de las ventas de recepción (no se confía en el precio del cliente).
+export async function getPreciosTarifa(productoIds: string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (productoIds.length === 0) return out;
+  const sb = sbAdmin();
+  const [{ data: precios, error: e1 }, tarifas] = await Promise.all([
+    sb.from("precios_producto").select("producto_id, lista_precio_id, precio").in("producto_id", productoIds),
+    getListasPrecios(),
+  ]);
+  if (e1) throw e1;
+  const defaultId = (tarifas as any[]).find((t) => t.es_default)?.id as string | undefined;
+  const override = new Map<string, number>();
+  for (const p of precios ?? []) override.set(`${p.producto_id}|${p.lista_precio_id}`, Number(p.precio));
+  for (const prod of productoIds) {
+    const detal = defaultId ? override.get(`${prod}|${defaultId}`) : undefined;
+    for (const t of tarifas as any[]) {
+      const ov = override.get(`${prod}|${t.id}`);
+      let precio: number | null = null;
+      if (ov != null) precio = ov;
+      else if (t.es_default) precio = detal != null && detal >= 0 ? detal : null;
+      else if (detal != null && detal >= 0) precio = Math.round(detal * (1 - Number(t.descuento_porcentaje ?? 0) / 100));
+      if (precio != null && precio >= 0) out.set(`${prod}|${t.id}`, precio);
+    }
+  }
+  return out;
+}
+
 export async function getProductos(opts: { onlyActivos?: boolean; onlyInventariables?: boolean } = {}) {
   let q = sbAdmin()
     .from("productos")

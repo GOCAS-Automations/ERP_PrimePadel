@@ -14,6 +14,15 @@ function validarCodigo(s: string): string | null {
   return null;
 }
 
+function validarBasicos(input: { nombre?: unknown; orden?: unknown; activa?: unknown }): string | null {
+  if (input.nombre !== undefined && (typeof input.nombre !== "string" || input.nombre.trim().length > 100)) {
+    return "El nombre debe tener máximo 100 caracteres.";
+  }
+  if (input.orden !== undefined && !Number.isInteger(input.orden)) return "El orden debe ser un número entero.";
+  if (input.activa !== undefined && typeof input.activa !== "boolean") return "Valor de 'activa' inválido.";
+  return null;
+}
+
 function validarDescuento(n: number | undefined): string | null {
   if (n === undefined) return null;
   if (!Number.isFinite(n) || n < 0 || n > 100) {
@@ -30,8 +39,10 @@ export async function createTarifa(input: {
   descuento_porcentaje: number;
 }): Promise<ActionResult> {
   await requireMaestro();
-  const codigo = input.codigo.trim().toUpperCase();
-  const nombre = input.nombre.trim();
+  const errBasicos = validarBasicos(input);
+  if (errBasicos) return { error: errBasicos };
+  const codigo = String(input.codigo ?? "").trim().toUpperCase();
+  const nombre = String(input.nombre ?? "").trim();
   if (!nombre) return { error: "El nombre es obligatorio." };
   const errCodigo = validarCodigo(codigo);
   if (errCodigo) return { error: errCodigo };
@@ -60,6 +71,8 @@ export async function updateTarifa(id: string, input: {
   descuento_porcentaje?: number;
 }): Promise<ActionResult> {
   await requireMaestro();
+  const errBasicos = validarBasicos(input);
+  if (errBasicos) return { error: errBasicos };
   const payload: Record<string, unknown> = {};
   if (input.nombre !== undefined) payload.nombre = input.nombre.trim();
   if (input.codigo !== undefined) {

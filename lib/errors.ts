@@ -131,6 +131,10 @@ export function humanizarError(msg: string | null | undefined): string {
   for (const { test, toMessage } of MAPPINGS) {
     if (test.test(s)) return toMessage(s);
   }
+  // No exponer detalles internos (nombres de tablas/funciones, errores de PostgREST/JWT).
+  if (/relation |column |syntax error|function .*\(|schema |PGRST|JWT|stack|at .*\.(js|ts):\d+/i.test(s)) {
+    return "Ocurrió un error interno. Intenta de nuevo o avísale al administrador.";
+  }
   // Limpia prefijos técnicos de Postgres si no hubo match.
   return s
     .replace(/^Error: /i, "")

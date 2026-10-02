@@ -7,7 +7,7 @@ import { exportCsvSchema } from "@/lib/validators/export-csv";
 import { sbAdmin } from "@/lib/supabase/admin-server";
 import { requireProfile, requireAdmin } from "@/lib/auth";
 import { humanizarError } from "@/lib/errors";
-import { getCostoPromedioPorProducto } from "@/lib/queries";
+import { getCostoPromedioPorProducto, getPreciosTarifa } from "@/lib/queries";
 
 type ActionResult<T = unknown> =
   T extends object ? ({ ok: true } & T) | { error: string } : { ok: true } | { error: string };
@@ -35,9 +35,18 @@ export async function registrarTransaccion(input: unknown): Promise<ActionResult
   // producto al momento de la venta (snapshot real). Si el producto aún no
   // tiene compras registradas, queda en 0.
   let items = parsed.items;
+  // Recepción: el precio de cada ítem lo fija el servidor según la tarifa
+  // elegida (si no, bastaría editar la request para vender a cualquier precio).
+  if (perfil.rol === "recepcion" && parsed.tipo === "venta") {
+    const precios = await getPreciosTarifa(Array.from(new Set(items.map((it) => it.producto_id))));
+    if (items.some((it) => !precios.has(`${it.producto_id}|${it.lista_precio_id}`))) {
+      return { error: "Una de las tarifas elegidas no está disponible para ese producto. Recarga la página e intenta de nuevo." };
+    }
+    items = items.map((it) => ({ ...it, precio_unitario: precios.get(`${it.producto_id}|${it.lista_precio_id}`)! }));
+  }
   if (parsed.tipo === "venta") {
     const costoProm = await getCostoPromedioPorProducto();
-    items = parsed.items.map((it) => ({
+    items = items.map((it) => ({
       ...it,
       costo_unitario: costoProm.get(it.producto_id) ?? 0,
     }));
@@ -114,7 +123,15 @@ export async function editarTransaccion(id: string, input: unknown): Promise<Act
 
   // -------------------- Camino A: edición ligera (sin tocar stock) --------------------
   if (!cambiaEstructura) {
-    return await editarSoloMetadata(id, parsed, perfil.user_id);
+    return await editarSoloMetadata(id, parsed, perfil.user_id, original.tipo === "venta");
+  }
+
+  // En ventas el costo lo fija SIEMPRE el servidor (costo promedio de compra),
+  // igual que en registrarTransaccion; nunca el valor enviado por el cliente.
+  let itemsNuevos = parsed.items;
+  if (parsed.tipo === "venta") {
+    const costoProm = await getCostoPromedioPorProducto();
+    itemsNuevos = parsed.items.map((it) => ({ ...it, costo_unitario: costoProm.get(it.producto_id) ?? 0 }));
   }
 
   // -------------------- Camino B: reverse + recreate --------------------
@@ -140,7 +157,7 @@ export async function editarTransaccion(id: string, input: unknown): Promise<Act
     p_usuario: creadorOriginal,
     p_notas: parsed.notas ?? null,
     p_origen: parsed.origen,
-    p_items: parsed.items,
+    p_items: itemsNuevos,
   });
 
   if (eIns) {
@@ -207,24 +224,25 @@ async function editarSoloMetadata(
   id: string,
   parsed: { fecha?: string; notas?: string | null; items: { producto_id: string; ubicacion_origen_id?: string | null; ubicacion_destino_id?: string | null; cantidad: number; precio_unitario: number; costo_unitario?: number; lista_precio_id?: string | null }[] },
   editorId: string,
+  esVenta: boolean,
 ): Promise<ActionResult<{ newId: string }>> {
   const sb = sbAdmin();
 
   // 1. Trae items actuales con ID (necesitamos el id para el UPDATE).
   const { data: itemsBD, error: eFetch } = await sb
     .from("transaccion_items")
-    .select("id, producto_id, ubicacion_origen_id, ubicacion_destino_id, cantidad")
+    .select("id, producto_id, ubicacion_origen_id, ubicacion_destino_id, cantidad, costo_unitario")
     .eq("transaccion_id", id);
   if (eFetch) return { error: humanizarError(eFetch.message) };
 
   // Empareja cada item del payload con su row en BD por firma.
   const firma = (it: any) =>
     `${it.producto_id}|${it.ubicacion_origen_id ?? ""}|${it.ubicacion_destino_id ?? ""}|${Number(it.cantidad)}`;
-  const bdPorFirma = new Map<string, string[]>(); // firma -> ids disponibles
+  const bdPorFirma = new Map<string, { id: string; costo: number }[]>(); // firma -> items disponibles
   for (const r of itemsBD ?? []) {
     const f = firma(r);
     if (!bdPorFirma.has(f)) bdPorFirma.set(f, []);
-    bdPorFirma.get(f)!.push(r.id as string);
+    bdPorFirma.get(f)!.push({ id: r.id as string, costo: Number(r.costo_unitario ?? 0) });
   }
 
   // 2. Para cada item del payload, encuentra el id de BD y actualiza precio/costo.
@@ -236,9 +254,10 @@ async function editarSoloMetadata(
       // No debería pasar si detectarCambioEstructura es correcto, pero por si acaso.
       return { error: "No se pudo emparejar uno de los productos al actualizar. Intenta de nuevo o avísale al administrador." };
     }
-    const itemId = candidatos.shift()!;
+    const { id: itemId, costo: costoBD } = candidatos.shift()!;
     const precio = Number(it.precio_unitario);
-    const costo = Number(it.costo_unitario ?? it.precio_unitario);
+    // Venta: se conserva el snapshot de costo guardado (no lo decide el cliente).
+    const costo = esVenta ? costoBD : Number(it.costo_unitario ?? it.precio_unitario);
     const cantidad = Number(it.cantidad);
     const subtotal = cantidad * precio;
     totalNuevo += subtotal;
@@ -301,7 +320,7 @@ export async function exportarTransaccionesCSV(
     .lte("fecha", finISO)
     .order("fecha", { ascending: false });
 
-  if (error) return { error: error.message };
+  if (error) return { error: humanizarError(error.message) };
 
   // Fallback: si una venta antigua quedó con costo_unitario = 0, usamos el
   // costo promedio de compra del producto para no subestimar costos/margen.
@@ -422,7 +441,9 @@ export async function exportarTransaccionesCSV(
     });
   }
 
-  const csv = Papa.unparse(rows, { quotes: true });
+  // escapeFormulae: antepone ' a celdas de texto que empiecen por = + - @ (inyección
+  // de fórmulas al abrir el CSV en Excel; notas y nombres los escribe el usuario).
+  const csv = Papa.unparse(rows, { quotes: true, escapeFormulae: true });
   const filename = `transacciones_${parsed.modo}_${parsed.fecha_inicio}_${parsed.fecha_fin}.csv`;
   return { ok: true, csv, filename };
 }

@@ -62,4 +62,8 @@ alter table perfiles                    force row level security;
 -- 4) Si en el futuro queremos exponer alguna lectura al cliente directamente
 --    (ej. un endpoint público de catálogo), agregamos una policy específica
 --    aquí, no quitamos RLS.
+--
+-- 5) RLS NO cubre vistas ni funciones RPC: ejecutar también
+--    supabase/security_hardening.sql (security_invoker en vistas, EXECUTE
+--    solo para service_role y privilegios por defecto cerrados).
 -- ============================================================================

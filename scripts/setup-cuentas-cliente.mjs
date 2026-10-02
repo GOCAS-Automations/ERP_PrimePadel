@@ -2,12 +2,13 @@
 // Pre-requisito: haber ejecutado supabase/migrations/001_tres_roles.sql en Supabase.
 //
 // Uso:
-//   node scripts/setup-cuentas-cliente.mjs
+//   PP_PASS_CESARC=... PP_PASS_MAESTRO=... PP_PASS_ADMIN=... PP_PASS_RECEPCION1=... PP_PASS_RECEPCION2=... \n//     node scripts/setup-cuentas-cliente.mjs
+//   (las contraseñas NUNCA van en el repo; se pasan por variables de entorno)
 //
 // Crea/actualiza:
-//   - recepcion1  / RecepcionPP1   (rol: recepcion)
-//   - recepcion2  / RecepcionPP2   (rol: recepcion)
-//   - admin       / AdminPP2026    (rol: admin)
+//   - recepcion1     (rol: recepcion)
+//   - recepcion2     (rol: recepcion)
+//   - admin           (rol: admin)
 //
 // El usuario maestro (tú) ya existe; la migración SQL lo movió a rol maestro.
 
@@ -20,31 +21,31 @@ const CUENTAS = [
     username: "CesarC",
     nombre: "Cesar Emilio Castaño Marin",
     rol: "maestro",
-    password: "CesarPP2026",
+    password: null, // se lee de PP_PASS_<USERNAME>
   },
   {
     username: "maestro",
     nombre: "Cuenta Maestra Prime Padel",
     rol: "maestro",
-    password: "MaestroPP2026",
+    password: null, // se lee de PP_PASS_<USERNAME>
   },
   {
     username: "admin",
     nombre: "Administrador del club",
     rol: "admin",
-    password: "AdminPP2026",
+    password: null, // se lee de PP_PASS_<USERNAME>
   },
   {
     username: "recepcion1",
     nombre: "Recepción 1 (turno mañana)",
     rol: "recepcion",
-    password: "RecepcionPP1",
+    password: null, // se lee de PP_PASS_<USERNAME>
   },
   {
     username: "recepcion2",
     nombre: "Recepción 2 (turno tarde)",
     rol: "recepcion",
-    password: "RecepcionPP2",
+    password: null, // se lee de PP_PASS_<USERNAME>
   },
 ];
 
@@ -93,6 +94,14 @@ async function ensureCuenta(sb, cuenta) {
 }
 
 async function run() {
+  for (const c of CUENTAS) {
+    const pass = process.env[`PP_PASS_${c.username.toUpperCase()}`];
+    if (!pass || pass.length < 12) {
+      throw new Error(`Falta PP_PASS_${c.username.toUpperCase()} (mínimo 12 caracteres)`);
+    }
+    c.password = pass;
+  }
+
   const sb = getAdminClient();
   console.log("Configurando cuentas del cliente Prime Padel...\n");
 
@@ -104,7 +113,7 @@ async function run() {
   console.log("✅ Cuentas listas:");
   console.log("============================================================");
   for (const c of CUENTAS) {
-    console.log(`   Usuario:    ${c.username.padEnd(12)}  Rol: ${c.rol.padEnd(10)}  Password: ${c.password}`);
+    console.log(`   Usuario:    ${c.username.padEnd(12)}  Rol: ${c.rol.padEnd(10)}  Password: (la que pasaste por entorno)`);
   }
   console.log("============================================================");
   console.log("\nEl login en /login se hace con el USUARIO (sin @), no con email.");

@@ -49,10 +49,10 @@ export const transaccionItemSchema = z
     producto_id: z.string().uuid(),
     ubicacion_origen_id: z.string().uuid().nullable().optional(),
     ubicacion_destino_id: z.string().uuid().nullable().optional(),
-    cantidad: z.number().int().positive(),
-    precio_unitario: z.number().nonnegative(),
+    cantidad: z.number().int().positive().max(1_000_000),
+    precio_unitario: z.number().nonnegative().max(1_000_000_000),
     // Costo al momento de la transacción. Si no se pasa, el RPC asume = precio_unitario.
-    costo_unitario: z.number().nonnegative().optional(),
+    costo_unitario: z.number().nonnegative().max(1_000_000_000).optional(),
     lista_precio_id: z.string().uuid().nullable().optional(),
   });
 
@@ -61,8 +61,9 @@ export const transaccionSchema = z
     tipo: z.enum(["compra", "venta", "traslado"]),
     fecha: z.string().datetime().optional(),
     notas: z.string().max(500).optional().nullable(),
-    origen: z.enum(["manual", "csv", "api", "migracion"]).default("manual"),
-    items: z.array(transaccionItemSchema).min(1, "Se requiere al menos un item"),
+    // Desde la UI solo se permiten estos orígenes ("migracion" lo usan los scripts).
+    origen: z.enum(["manual", "csv"]).default("manual"),
+    items: z.array(transaccionItemSchema).min(1, "Se requiere al menos un item").max(300, "Máximo 300 productos por transacción"),
   })
   .superRefine((val, ctx) => {
     for (const [i, it] of val.items.entries()) {

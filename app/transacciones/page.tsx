@@ -77,6 +77,10 @@ export default async function TransaccionesPage() {
     return out;
   }
 
+  // Recepción no debe recibir costos: todo lo que se pasa como prop a un client
+  // component queda visible en el HTML/payload RSC del navegador.
+  const ocultarCostos = perfil.rol === "recepcion";
+
   const productosOpt = (productos ?? []).map((p: any) => ({
     id: p.id,
     codigo: p.codigo,
@@ -84,7 +88,7 @@ export default async function TransaccionesPage() {
     es_inventariable: p.es_inventariable,
     tipo: p.tipo,
     precio_detal: precioPorProd.get(p.id) ?? null,
-    costo_unitario: Number(p.costo_unitario ?? 0),
+    costo_unitario: ocultarCostos ? 0 : Number(p.costo_unitario ?? 0),
     stock_por_ubicacion: stockPorProd.get(p.id) ?? {},
     precios_tarifa: preciosTarifaDeProducto(p.id),
   }));
@@ -117,7 +121,7 @@ export default async function TransaccionesPage() {
       ubicacion_destino_id: it.ubicacion_destino_id,
       cantidad: Number(it.cantidad),
       precio_unitario: Number(it.precio_unitario),
-      costo_unitario: Number(it.costo_unitario ?? 0),
+      costo_unitario: ocultarCostos ? 0 : Number(it.costo_unitario ?? 0),
       lista_precio_id: it.lista_precio_id,
       productos: it.productos,
       categoria_id: it.productos?.categoria_id ?? null,

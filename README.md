@@ -167,13 +167,18 @@ Requisitos: Node 20+, pnpm 9+, proyecto de Supabase creado.
 NEXT_PUBLIC_SUPABASE_URL=...
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=...
 SUPABASE_SERVICE_ROLE_KEY=...   # solo server-side; nunca commit
+CRON_SECRET=...                 # cadena aleatoria larga; protege /api/heartbeat (Vercel la envía como Bearer)
 ```
 
 ## Despliegue
 
 1. Push a rama `main`.
 2. Vercel auto-despliega.
-3. Variables de entorno configuradas en Vercel Dashboard (incluida la `SUPABASE_SERVICE_ROLE_KEY`).
+3. Variables de entorno configuradas en Vercel Dashboard (incluidas `SUPABASE_SERVICE_ROLE_KEY` y `CRON_SECRET`).
+
+### Latido de Supabase (anti-pausa del plan gratis)
+
+Supabase pausa los proyectos gratis tras 7 días sin actividad. [`vercel.json`](vercel.json) define un cron diario (12:00 UTC) que llama a `/api/heartbeat` ([`app/api/heartbeat/route.ts`](app/api/heartbeat/route.ts)); el endpoint exige `Authorization: Bearer $CRON_SECRET` y hace una consulta real a Postgres. Verificar en Vercel → proyecto → Settings → Cron Jobs que aparece y que la última ejecución devolvió 200.
 
 ## Roles y permisos
 
@@ -203,7 +208,11 @@ La validación de rol se hace SIEMPRE en server actions (`requireProfile`, `requ
 - **RLS activo** en todas las tablas del dominio (ver [`supabase/rls.sql`](supabase/rls.sql)). Sin políticas → la API REST con la `publishable_key` devuelve 0 filas. El cliente no puede consultar BD directamente.
 - **`service_role_key`** solo en variables de entorno server-side. El único módulo que la usa (`lib/supabase/admin-server.ts`) tiene `import "server-only"` para que el bundler de Next.js falle si alguien intenta importarla desde un componente cliente.
 - **RBAC** validado en backend por cada operación sensible (delete, edit, export, gestión de usuarios).
-- **Backups**: Supabase hace snapshots automáticos diarios.
+- **Endurecimiento de BD**: [`supabase/security_hardening.sql`](supabase/security_hardening.sql) (idempotente) revoca a `anon`/`authenticated` todo acceso a tablas, vistas y funciones RPC del esquema `public`, y pone las vistas en `security_invoker`. Re-ejecutarlo tras cualquier migración que recree funciones o vistas.
+- **Cabeceras web**: CSP, HSTS, `X-Frame-Options`, `Referrer-Policy` y `Permissions-Policy` en [`next.config.mjs`](next.config.mjs); páginas autenticadas con `Cache-Control: private, no-store`.
+- **Login**: parámetro `next` validado (sin open redirect) y límite de intentos fallidos por usuario/IP (en memoria por instancia: mitigación parcial).
+- **Cuentas**: las contraseñas nunca van en el repo; `scripts/setup-cuentas-cliente.mjs` las lee de variables de entorno `PP_PASS_<USUARIO>`. Desactivar "Allow new users to sign up" en Supabase Auth (los usuarios se crean desde `/usuarios`).
+- **Backups**: el plan gratis de Supabase **no** incluye backups automáticos; hacer un respaldo manual periódico (`pg_dump` o exportar las tablas a CSV desde el Table Editor).
 
 ## Carga masiva por CSV
 
@@ -269,6 +278,7 @@ Los cambios de schema viven en archivos numerados/descriptivos en [`supabase/`](
 2. `rls.sql` — habilita RLS en todas las tablas del dominio. Idempotente.
 3. `migration-costo-unitario.sql` — añade columna `costo_unitario` a `transaccion_items` con backfill + recrea el RPC para aceptarla. Idempotente.
 4. `migration-tarifas-descuento.sql` — añade columna `descuento_porcentaje` a `listas_precios` (por defecto 0). Idempotente.
+5. `security_hardening.sql` — revoca acceso de `anon`/`authenticated` a tablas, vistas y RPC; vistas en `security_invoker`. Idempotente; **ejecutar siempre al final** y re-ejecutar tras recrear funciones/vistas.
 
 Para futuras migraciones: crear un nuevo archivo `migration-<descripcion>.sql` en `supabase/`, idempotente (con `IF NOT EXISTS` o `IF EXISTS`), y mantener `schema.sql` actualizado para reflejar el modelo final.
 
